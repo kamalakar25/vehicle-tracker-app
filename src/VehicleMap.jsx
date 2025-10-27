@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 
-// ✅ Fix Leaflet marker default icon issue
+// Fix Leaflet marker default icon issue
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
@@ -30,16 +30,16 @@ function calculateBearing(startLat, startLng, endLat, endLng) {
   return (bearing + 360) % 360
 }
 
-function VehicleMap({ 
-  routeData, 
-  isPlaying, 
-  currentIndex, 
+function VehicleMap({
+  routeData,
+  isPlaying,
+  currentIndex,
   setCurrentIndex,
   animationTime,
   setAnimationTime,
   totalSeconds,
   currentStop,
-  setCurrentStop 
+  setCurrentStop,
 }) {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
@@ -56,7 +56,7 @@ function VehicleMap({
   const [cumLegStarts, setCumLegStarts] = useState([])
   const [legDurations, setLegDurations] = useState([])
 
-  // ✅ Create rotatable vehicle icon (place image.png in /public folder)
+  // Create rotatable vehicle icon (place image.png in /public folder)
   const createVehicleIcon = (rotation = 0) =>
     L.divIcon({
       html: `<img src="/image.png" alt="Vehicle" style="width: 38px; height: 38px; transform: rotate(${rotation}deg); transform-origin: center;" />`,
@@ -65,7 +65,7 @@ function VehicleMap({
       className: "custom-div-icon",
     })
 
-  // ✅ Reset animation when route changes
+  // Reset animation when route changes
   useEffect(() => {
     if (roadRoute.length > 0) {
       setAnimationTime(0)
@@ -73,9 +73,10 @@ function VehicleMap({
       prevStopRef.current = -1
       setCurrentStop(1)
     }
-  }, [roadRoute, setAnimationTime, setCurrentStop])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadRoute])
 
-  // ✅ Sync animation time from parent currentIndex when paused
+  // Sync animation time from parent currentIndex when paused
   useEffect(() => {
     if (!isPlaying && totalSeconds > 0 && roadRoute.length > 0) {
       const approxProgress = currentIndex / (roadRoute.length - 1)
@@ -85,12 +86,14 @@ function VehicleMap({
       prevStopRef.current = approxStopIdx
       setCurrentStop(approxStopIdx + 1)
     }
-  }, [currentIndex, isPlaying, totalSeconds, roadRoute.length, routeData.length, setAnimationTime, setCurrentStop])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, isPlaying, totalSeconds, roadRoute.length, routeData.length])
 
-  // ✅ Fetch snapped-to-road routes for each leg using alternative public OSRM instance
+  // Fetch snapped-to-road routes for each leg using alternative public OSRM instance
   useEffect(() => {
+    let mounted = true
     async function fetchRoadRoutes() {
-      if (routeData.length < 2) return
+      if (!routeData || routeData.length < 2) return
 
       const legDurs = []
       for (let i = 0; i < routeData.length - 1; i++) {
@@ -98,9 +101,9 @@ function VehicleMap({
         const t2 = new Date(routeData[i + 1].timestamp).getTime()
         legDurs.push((t2 - t1) / 1000)
       }
+      if (!mounted) return
       setLegDurations(legDurs)
 
-      // Fetch each leg route with fallback
       const promises = []
       for (let i = 0; i < routeData.length - 1; i++) {
         const start = `${routeData[i].longitude},${routeData[i].latitude}`
@@ -108,7 +111,7 @@ function VehicleMap({
         const url = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${start};${end}?overview=full&geometries=geojson`
         const straightCoords = [
           { latitude: routeData[i].latitude, longitude: routeData[i].longitude },
-          { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude }
+          { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude },
         ]
         promises.push(
           (async (legIndex) => {
@@ -119,7 +122,7 @@ function VehicleMap({
               clearTimeout(timeoutId)
               if (!res.ok) throw new Error(`HTTP ${res.status}`)
               const data = await res.json()
-              if (data.routes && data.routes[0]) {
+              if (data.routes && data.routes[0] && data.routes[0].geometry && data.routes[0].geometry.coordinates) {
                 return data.routes[0].geometry.coordinates.map(([lon, lat]) => ({
                   latitude: lat,
                   longitude: lon,
@@ -129,7 +132,7 @@ function VehicleMap({
                 return straightCoords
               }
             } catch (err) {
-              if (err.name === 'AbortError') {
+              if (err.name === "AbortError") {
                 console.warn(`Timeout for leg ${legIndex}, using straight line`)
               } else {
                 console.error(`Failed to fetch leg ${legIndex}:`, err)
@@ -142,6 +145,7 @@ function VehicleMap({
 
       try {
         const legGeoms = await Promise.all(promises)
+        if (!mounted) return
         setLegGeometries(legGeoms)
 
         // Build full roadRoute and cumulative leg starts
@@ -157,6 +161,7 @@ function VehicleMap({
         setCumLegStarts(cls)
       } catch (err) {
         console.error("Failed to process routes:", err)
+        if (!mounted) return
         // Fallback: build straight route
         const straightRr = []
         const straightCls = [0]
@@ -164,31 +169,44 @@ function VehicleMap({
         for (let i = 0; i < routeData.length - 1; i++) {
           const legStraight = [
             { latitude: routeData[i].latitude, longitude: routeData[i].longitude },
-            { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude }
+            { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude },
           ]
           straightRr.push(...legStraight)
           straightCs += legStraight.length
           straightCls.push(straightCs)
         }
-        setLegGeometries(Array(routeData.length - 1).fill().map((_, i) => [
-          { latitude: routeData[i].latitude, longitude: routeData[i].longitude },
-          { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude }
-        ]))
+        setLegGeometries(
+          Array(routeData.length - 1)
+            .fill()
+            .map((_, i) => [
+              { latitude: routeData[i].latitude, longitude: routeData[i].longitude },
+              { latitude: routeData[i + 1].latitude, longitude: routeData[i + 1].longitude },
+            ])
+        )
         setRoadRoute(straightRr)
         setCumLegStarts(straightCls)
       }
     }
 
     fetchRoadRoutes()
+    return () => {
+      mounted = false
+    }
   }, [routeData])
 
-  // ✅ Add stop markers
+  // Add stop markers
   useEffect(() => {
-    if (!mapInstanceRef.current || routeData.length === 0) return
+    if (!mapInstanceRef.current || !routeData || routeData.length === 0) return
 
-    // Clear previous markers
+    // Clear previous markers safely
     stopMarkersRef.current.forEach((m) => {
-      if (mapInstanceRef.current) mapInstanceRef.current.removeLayer(m)
+      try {
+        if (m && mapInstanceRef.current && mapInstanceRef.current.hasLayer && mapInstanceRef.current.hasLayer(m)) {
+          mapInstanceRef.current.removeLayer(m)
+        }
+      } catch (err) {
+        console.warn("Error removing previous stop marker:", err)
+      }
     })
     stopMarkersRef.current = []
 
@@ -209,51 +227,80 @@ function VehicleMap({
     })
 
     stopMarkersRef.current = markers
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeData])
 
-  // ✅ Initialize map and marker
+  // Initialize map and marker
   useEffect(() => {
-    if (!mapRef.current || roadRoute.length === 0) return
+    if (!mapRef.current || !roadRoute || roadRoute.length === 0) return
 
     if (!mapInstanceRef.current) {
-      const firstPoint = roadRoute[0]
-      mapInstanceRef.current = L.map(mapRef.current).setView([firstPoint.latitude, firstPoint.longitude], 15)
+      try {
+        const firstPoint = roadRoute[0]
+        mapInstanceRef.current = L.map(mapRef.current).setView([firstPoint.latitude, firstPoint.longitude], 15)
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      }).addTo(mapInstanceRef.current)
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+        }).addTo(mapInstanceRef.current)
 
-      // ✅ Add vehicle marker with initial icon (0° rotation)
-      markerRef.current = L.marker([firstPoint.latitude, firstPoint.longitude], {
-        icon: createVehicleIcon(0),
-        title: "Vehicle",
-      })
-        .addTo(mapInstanceRef.current)
-        .bindPopup("🚗 Vehicle is moving")
+        // Add vehicle marker with initial icon (0° rotation)
+        markerRef.current = L.marker([firstPoint.latitude, firstPoint.longitude], {
+          icon: createVehicleIcon(0),
+          title: "Vehicle",
+        })
+          .addTo(mapInstanceRef.current)
+          .bindPopup("🚗 Vehicle is moving")
 
-      // ✅ Draw full planned route (dashed gray)
-      const fullRouteCoords = roadRoute.map((p) => [p.latitude, p.longitude])
-      L.polyline(fullRouteCoords, {
-        color: "#9ca3af",
-        weight: 2,
-        dashArray: "5, 5",
-        opacity: 0.5,
-      }).addTo(mapInstanceRef.current)
+        // Draw full planned route (dashed gray)
+        const fullRouteCoords = roadRoute.map((p) => [p.latitude, p.longitude])
+        L.polyline(fullRouteCoords, {
+          color: "#9ca3af",
+          weight: 2,
+          dashArray: "5, 5",
+          opacity: 0.5,
+        }).addTo(mapInstanceRef.current)
 
-      // ✅ Draw traveled route (initially empty, solid blue)
-      traveledPolylineRef.current = L.polyline([], {
-        color: "#3b82f6",
-        weight: 4,
-        opacity: 0.7,
-      }).addTo(mapInstanceRef.current)
+        // Draw traveled route (initially empty, solid blue)
+        traveledPolylineRef.current = L.polyline([], {
+          color: "#3b82f6",
+          weight: 4,
+          opacity: 0.7,
+        }).addTo(mapInstanceRef.current)
 
-      mapInstanceRef.current.fitBounds(L.latLngBounds(fullRouteCoords))
+        mapInstanceRef.current.fitBounds(L.latLngBounds(fullRouteCoords))
+        // ensure proper rendering
+        setTimeout(() => {
+          try {
+            mapInstanceRef.current.invalidateSize()
+          } catch (err) {
+            // ignore
+          }
+        }, 0)
+      } catch (err) {
+        console.error("Error initializing Leaflet map:", err)
+      }
     }
+
+    // cleanup when unmounting the map component
+    return () => {
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove()
+        } catch (err) {
+          // ignore
+        }
+        mapInstanceRef.current = null
+        markerRef.current = null
+        traveledPolylineRef.current = null
+        stopMarkersRef.current = []
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roadRoute])
 
-  // ✅ Smooth time-based animation using requestAnimationFrame
+  // Smooth time-based animation using requestAnimationFrame
   useEffect(() => {
-    if (totalSeconds <= 0 || roadRoute.length < 2) return
+    if (totalSeconds <= 0 || !roadRoute || roadRoute.length < 2) return
 
     const animate = (currentTime) => {
       if (!isPlaying) return
@@ -276,14 +323,15 @@ function VehicleMap({
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
       }
       prevTimeRef.current = null
     }
-  }, [isPlaying, speed, totalSeconds, setAnimationTime])
+  }, [isPlaying, speed, totalSeconds, setAnimationTime, roadRoute])
 
-  // ✅ Sync discrete currentIndex to parent
+  // Sync discrete currentIndex to parent
   useEffect(() => {
-    if (roadRoute.length === 0 || totalSeconds === 0) return
+    if (!roadRoute || roadRoute.length === 0 || totalSeconds === 0) return
 
     const approxProgress = animationTime / totalSeconds
     const approxIdx = approxProgress * (roadRoute.length - 1)
@@ -292,11 +340,26 @@ function VehicleMap({
       setCurrentIndex(floor)
       prevFloorRef.current = floor
     }
-  }, [animationTime, roadRoute.length, totalSeconds, setCurrentIndex])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animationTime, roadRoute.length, totalSeconds])
 
-  // ✅ Update vehicle position, rotation, traveled route, and stop popup with time-based interpolation
+  // Update vehicle position, rotation, traveled route, and stop popup with time-based interpolation
   useEffect(() => {
-    if (roadRoute.length < 2 || !markerRef.current || totalSeconds === 0 || legGeometries.length === 0 || legDurations.length === 0) return
+    // required data present?
+    if (
+      !roadRoute ||
+      roadRoute.length < 2 ||
+      !markerRef.current ||
+      totalSeconds === 0 ||
+      !legGeometries ||
+      legGeometries.length === 0 ||
+      !legDurations ||
+      legDurations.length === 0 ||
+      !cumLegStarts ||
+      cumLegStarts.length === 0
+    ) {
+      return
+    }
 
     const progress = animationTime / totalSeconds
     let stopIdx = Math.floor(progress * (routeData.length - 1))
@@ -305,10 +368,18 @@ function VehicleMap({
     // Update stop popup if new stop reached
     if (stopIdx !== prevStopRef.current) {
       if (prevStopRef.current >= 0 && stopMarkersRef.current[prevStopRef.current]) {
-        stopMarkersRef.current[prevStopRef.current].closePopup()
+        try {
+          stopMarkersRef.current[prevStopRef.current].closePopup()
+        } catch (err) {
+          // ignore
+        }
       }
       if (stopIdx < stopMarkersRef.current.length && stopMarkersRef.current[stopIdx]) {
-        stopMarkersRef.current[stopIdx].openPopup()
+        try {
+          stopMarkersRef.current[stopIdx].openPopup()
+        } catch (err) {
+          // ignore
+        }
       }
       prevStopRef.current = stopIdx
     }
@@ -316,26 +387,32 @@ function VehicleMap({
     if (animationTime >= totalSeconds) {
       // At end
       const lastPoint = roadRoute[roadRoute.length - 1]
-      markerRef.current.setLatLng([lastPoint.latitude, lastPoint.longitude])
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.panTo([lastPoint.latitude, lastPoint.longitude], { animate: true, duration: 0.1 })
-      }
-      if (traveledPolylineRef.current) {
-        const traveledCoords = roadRoute.map((pt) => [pt.latitude, pt.longitude])
-        traveledPolylineRef.current.setLatLngs(traveledCoords)
-      }
-      // Set bearing to last segment
-      if (roadRoute.length > 1) {
-        const prevP = roadRoute[roadRoute.length - 2]
-        const lastP = lastPoint
-        const bearing = calculateBearing(prevP.latitude, prevP.longitude, lastP.latitude, lastP.longitude)
-        const newIcon = createVehicleIcon(bearing)
-        markerRef.current.setIcon(newIcon)
+      if (lastPoint && markerRef.current) {
+        try {
+          markerRef.current.setLatLng([lastPoint.latitude, lastPoint.longitude])
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.panTo([lastPoint.latitude, lastPoint.longitude], { animate: true, duration: 0.1 })
+          }
+          if (traveledPolylineRef.current) {
+            const traveledCoords = roadRoute.map((pt) => [pt.latitude, pt.longitude])
+            traveledPolylineRef.current.setLatLngs(traveledCoords)
+          }
+          // Set bearing to last segment
+          if (roadRoute.length > 1) {
+            const prevP = roadRoute[roadRoute.length - 2]
+            const lastP = lastPoint
+            const bearing = calculateBearing(prevP.latitude, prevP.longitude, lastP.latitude, lastP.longitude)
+            const newIcon = createVehicleIcon(bearing)
+            markerRef.current.setIcon(newIcon)
+          }
+        } catch (err) {
+          console.warn("Error when finalizing position:", err)
+        }
       }
       return
     }
 
-    // Find current leg
+    // Find current leg safely
     let leg = 0
     let cumTime = 0
     for (let i = 0; i < legDurations.length; i++) {
@@ -345,12 +422,19 @@ function VehicleMap({
         break
       }
     }
+    if (leg < 0 || leg >= legDurations.length) {
+      console.warn("Computed leg out of range:", leg)
+      return
+    }
     const legStartTime = cumTime - legDurations[leg]
-    const legDuration = legDurations[leg]
+    const legDuration = legDurations[leg] || 1 // avoid div by 0
     const frac = (animationTime - legStartTime) / legDuration
     const legRoute = legGeometries[leg] || []
     const legLen = legRoute.length
-    if (legLen < 2) return // Invalid leg
+    if (legLen < 2) {
+      console.warn("Leg route invalid or too short for leg:", leg, legRoute)
+      return // Invalid leg
+    }
 
     const targetSubIdx = frac * (legLen - 1)
     let subFloor, subFrac, pos, bearing
@@ -364,6 +448,10 @@ function VehicleMap({
       subFrac = targetSubIdx - subFloor
       const startP = legRoute[subFloor]
       const endP = legRoute[subFloor + 1]
+      if (!startP || !endP) {
+        console.warn("Start or end point missing in sub-leg:", leg, subFloor)
+        return
+      }
       const lat = startP.latitude + subFrac * (endP.latitude - startP.latitude)
       const lng = startP.longitude + subFrac * (endP.longitude - startP.longitude)
       pos = { latitude: lat, longitude: lng }
@@ -371,29 +459,44 @@ function VehicleMap({
     }
 
     // Update marker position and rotation
-    markerRef.current.setLatLng([pos.latitude, pos.longitude])
-    const newIcon = createVehicleIcon(bearing)
-    markerRef.current.setIcon(newIcon)
+    try {
+      if (markerRef.current && pos) {
+        markerRef.current.setLatLng([pos.latitude, pos.longitude])
+        const newIcon = createVehicleIcon(bearing)
+        markerRef.current.setIcon(newIcon)
+      }
+    } catch (err) {
+      console.warn("Error updating marker position or icon:", err)
+    }
 
     // Pan to position
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.panTo([pos.latitude, pos.longitude], { animate: true, duration: 0.1 })
+    try {
+      if (mapInstanceRef.current && pos) {
+        mapInstanceRef.current.panTo([pos.latitude, pos.longitude], { animate: true, duration: 0.1 })
+      }
+    } catch (err) {
+      console.warn("Error panning map:", err)
     }
 
     // Update traveled polyline
-    if (traveledPolylineRef.current) {
-      const baseEndIdx = cumLegStarts[leg] + subFloor + 1
-      let traveledCoords = roadRoute.slice(0, baseEndIdx).map((pt) => [pt.latitude, pt.longitude])
-      if (subFrac > 0 && subFrac < 1) {
-        traveledCoords.push([pos.latitude, pos.longitude])
+    try {
+      if (traveledPolylineRef.current) {
+        const baseEndIdx = (cumLegStarts[leg] || 0) + subFloor + 1
+        let traveledCoords = (roadRoute.slice(0, baseEndIdx) || []).map((pt) => [pt.latitude, pt.longitude])
+        if (subFrac > 0 && subFrac < 1) {
+          traveledCoords.push([pos.latitude, pos.longitude])
+        }
+        traveledPolylineRef.current.setLatLngs(traveledCoords)
       }
-      traveledPolylineRef.current.setLatLngs(traveledCoords)
+    } catch (err) {
+      console.warn("Error updating traveled polyline:", err)
     }
-  }, [animationTime, roadRoute, legGeometries, cumLegStarts, legDurations, totalSeconds, routeData, setCurrentStop, isPlaying])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animationTime, roadRoute, legGeometries, cumLegStarts, legDurations, totalSeconds, routeData, isPlaying])
 
   return (
     <div className="vehicle-map-container">
-      <div ref={mapRef} className="map" />
+      <div ref={mapRef} className="map" style={{ height: "400px" }} />
       <div className="controls">
         <div className="speed-control">
           <label htmlFor="speed-slider">Speed: </label>
